@@ -3,13 +3,12 @@
 use strict;
 use JSON -support_by_pp;
 use JSON::RPC::Client;
-use Digest::SHA qw(hmac_sha512_hex);
 use warnings;
 use LWP::Simple;
-use Time::HiRes qw(gettimeofday);
 use LWP::UserAgent;
 use Data::Dumper;
 use Term::ReadKey;
+use Scalar::Util qw(looks_like_number);
 
 $| = 1;
 
@@ -44,9 +43,18 @@ chomp($asset);
 
 my $assetinfo = getAsset($asset);
 
-print 'Menge?:';
+print 'Amount?:';
 my $menge = <STDIN>;
 chomp($menge);
+
+print 'How much confirmation of vote do you suggest till reward? (Enter a number - max. 720 - or press enter for not checking it):';
+my $confirmations = <STDIN>;
+chomp($confirmations);
+
+if(looks_like_number($confirmations) && $confirmations > 720)
+{
+	$confirmations = 720;
+}
 
 my $mengeqnt;
 
@@ -57,13 +65,22 @@ if($asset eq 'NXT')
 {
 	print 'Transmitting '.$menge." NXT pro vote...\n";
 	$mengeqnt = (10**8)*$menge;
-	print "menge in NQT:".$mengeqnt."\n";
+	print "amount in NQT:".$mengeqnt."\n";
 }
 else
 {
 	print 'Transmitting '.$menge.' '.$assetinfo->{name}." pro vote...\n";
 	$mengeqnt = (10**($assetinfo->{decimals}))*$menge;
-	print "menge in QNT:".$mengeqnt."\n";
+	print "amount in QNT:".$mengeqnt."\n";
+}
+
+if(looks_like_number($confirmations))
+{
+	print 'Rewards will be sent only after '.$confirmations." confirmation of vote.\n" ;	
+}
+else
+{
+	print "Rewards will be sent as soon as possible after voting. Confirmations of vote will be not checked.\n";
 }
 
 print "\nOk?[Y/n]:";
@@ -74,8 +91,13 @@ die 'Aborted...' unless $feedback eq '' || $feedback eq 'Y' || $feedback eq 'y' 
 
 while (1) {
   doit();
-  #exit(0);
-  sleep(10);
+  if($pollinfo->{finished})
+  {
+	print "The poll has been finished...\n";
+	exit(0);
+  }
+  sleep(30);
+  $pollinfo = getPoll($poll);
 }
 
 sub doit
@@ -178,11 +200,11 @@ sub sendReward {
 
 	if($asset eq 'NXT')
 	{
-        	$req->content("requestType=sendMoney&recipient=".$rec."&message=".$msg."&amountNQT=".$men."&secretPhrase=".$secret."&feeNQT=100000000&deadline=1440");
+        	$req->content("requestType=sendMoney&recipient=".$rec."&message=".$msg."&messageIsPrunable=false&amountNQT=".$men."&secretPhrase=".$secret."&feeNQT=100000000&deadline=1440");
 	}
 	else
 	{
-        	$req->content("requestType=transferAsset&recipient=".$rec."&asset=".$asset."&message=".$msg."&quantityQNT=".$men."&secretPhrase=".$secret."&feeNQT=100000000&deadline=1440");
+        	$req->content("requestType=transferAsset&recipient=".$rec."&asset=".$asset."&message=".$msg."&messageIsPrunable=false&quantityQNT=".$men."&secretPhrase=".$secret."&feeNQT=100000000&deadline=1440");
 	}
 
         my $res = $lwp->request($req);
@@ -222,15 +244,15 @@ sub getTransaction {
 
 sub checkTransaction {
 	my ($id) = shift;
-	my $res = 0;
+	my $res = 1;
 
 	my $tx = getTransaction($id);
 	
 	#print Dumper($tx);
 
-	if($tx->{confirmations} >= 720)
+	if(looks_like_number($confirmations) && $tx->{confirmations} < $confirmations)
 	{
-		$res = 1;
+		$res = 0;
 	}
 
 	return $res;
@@ -239,10 +261,22 @@ sub checkTransaction {
 sub checkVote {
 	my ($vt) = shift;
 	my $res = 0;
-	
-	if($vt->{weight} > 0)
+
+	#print Dumper($vt);
+
+	my $wg = $vt->{weight};	
+
+	if(defined $wg)
 	{
-		$res = checkTransaction($vt->{transaction});
+		if($wg > 0)
+		{
+			$res = checkTransaction($vt->{transaction});
+		}
+	}
+	else
+	{
+		# the poll has been finished...
+		$res = 1;
 	}
 
 	return $res;
