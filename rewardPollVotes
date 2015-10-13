@@ -1,0 +1,300 @@
+#!/usr/bin/perl -w
+
+use strict;
+use JSON -support_by_pp;
+use JSON::RPC::Client;
+use Digest::SHA qw(hmac_sha512_hex);
+use warnings;
+use LWP::Simple;
+use Time::HiRes qw(gettimeofday);
+use LWP::UserAgent;
+use Data::Dumper;
+use Term::ReadKey;
+
+$| = 1;
+
+my $port = '7876';
+
+my $lwp = LWP::UserAgent->new;
+$lwp->agent("perl $]");
+my $json = new JSON;
+
+my $client = new JSON::RPC::Client;
+
+print 'Poll id?:';
+my $poll = <STDIN>;
+chomp($poll);
+
+my $pollinfo = getPoll($poll);
+
+print 'Account RS?:';
+my $account = <STDIN>;
+chomp($account);
+
+ReadMode ('noecho');
+print 'Account secret phrase?:';
+my $secret = <STDIN>;
+chomp($secret);
+print "\n";
+ReadMode ('restore');
+
+print 'Asset id (for NXT type "NXT")?:';
+my $asset = <STDIN>;
+chomp($asset);
+
+my $assetinfo = getAsset($asset);
+
+print 'Menge?:';
+my $menge = <STDIN>;
+chomp($menge);
+
+my $mengeqnt;
+
+print "\n\n\n";
+print 'Poll :'.$pollinfo->{name}."\n";
+print 'Account RS :'.$account."\n";
+if($asset eq 'NXT')
+{
+	print 'Transmitting '.$menge." NXT pro vote...\n";
+	$mengeqnt = (10**8)*$menge;
+	print "menge in NQT:".$mengeqnt."\n";
+}
+else
+{
+	print 'Transmitting '.$menge.' '.$assetinfo->{name}." pro vote...\n";
+	$mengeqnt = (10**($assetinfo->{decimals}))*$menge;
+	print "menge in QNT:".$mengeqnt."\n";
+}
+
+print "\nOk?[Y/n]:";
+my $feedback = <STDIN>;
+chomp($feedback);
+
+die 'Aborted...' unless $feedback eq '' || $feedback eq 'Y' || $feedback eq 'y' || $feedback eq 'yes';
+
+while (1) {
+  doit();
+  #exit(0);
+  sleep(10);
+}
+
+sub doit
+{
+  eval{
+	my $pollvotes = getPollVotes($poll);
+
+	#print Dumper($pollvotes);
+
+	# first: get unconfirmed txs. 
+	# second: get confirmed txs.
+	# so there is no lost transactions, perhaps doubling...
+	my $unconftxs = getAllUnconfTx($account);
+
+	#print Dumper($unconftxs);
+
+	my $transactions = getAllTxWithMessage($account);
+
+	#print Dumper($transactions);
+
+	my @voters = getVotersWithoutReward($transactions, $unconftxs, $pollvotes);
+	my $voter;
+
+	foreach $voter (@voters) 
+	{
+		my $sendresp = sendReward($voter, $mengeqnt, 'Thank you for voting... (Poll:'.$poll.'; '.$pollinfo->{name}.')');
+		print $voter." - reward sent...\n";
+		#print Dumper($sendresp);
+	}
+  };
+  # catch crashes:
+  if($@){
+    print " ERR $@\n";
+  }
+}
+
+sub getJSON {
+        my ($raw) = shift;
+
+        my $res = $json->allow_nonref->utf8->relaxed->escape_slash->loose->allow_singlequote->allow_barekey->decode($raw->content);
+
+        return $res;
+};
+
+sub getPollVotes {
+	my ($pl) = shift;
+        my $req = HTTP::Request->new(GET => 'http://localhost:'.$port.'/nxt?requestType=getPollVotes&includeWeights=true&poll='.$pl);
+        my $res = $lwp->request($req);
+
+        my $json_res = getJSON($res);
+
+	return $json_res;
+};
+
+sub getPoll {
+	my ($pl) = shift;
+        my $req = HTTP::Request->new(GET => 'http://localhost:'.$port.'/nxt?requestType=getPoll&poll='.$pl);
+        my $res = $lwp->request($req);
+
+        my $json_res = getJSON($res);
+
+	return $json_res;
+};
+
+sub getAsset {
+	my ($ast) = shift;
+        my $req = HTTP::Request->new(GET => 'http://localhost:'.$port.'/nxt?requestType=getAsset&asset='.$ast);
+        my $res = $lwp->request($req);
+
+        my $json_res = getJSON($res);
+
+	return $json_res;
+};
+
+sub getAllTxWithMessage {
+	my ($acc) = shift;
+        my $req = HTTP::Request->new(GET => 'http://localhost:'.$port.'/nxt?requestType=getBlockchainTransactions&withMessage=true&account='.$acc);
+        my $res = $lwp->request($req);
+
+        my $json_res = getJSON($res);
+
+	return $json_res;
+};
+
+sub getAllUnconfTx {
+	my ($acc) = shift;
+        my $req = HTTP::Request->new(GET => 'http://localhost:'.$port.'/nxt?requestType=getUnconfirmedTransactions&account='.$acc);
+        my $res = $lwp->request($req);
+
+        my $json_res = getJSON($res);
+
+	return $json_res;
+};
+
+sub sendReward {
+        my ($rec, $men, $msg) = @_;
+
+        my $req = HTTP::Request->new(POST => 'http://localhost:'.$port.'/nxt');
+        $req->content_type('application/x-www-form-urlencoded');
+
+	if($asset eq 'NXT')
+	{
+        	$req->content("requestType=sendMoney&recipient=".$rec."&message=".$msg."&amountNQT=".$men."&secretPhrase=".$secret."&feeNQT=100000000&deadline=1440");
+	}
+	else
+	{
+        	$req->content("requestType=transferAsset&recipient=".$rec."&asset=".$asset."&message=".$msg."&quantityQNT=".$men."&secretPhrase=".$secret."&feeNQT=100000000&deadline=1440");
+	}
+
+        my $res = $lwp->request($req);
+
+	#print Dumper($res);
+
+        die "Request failed!" unless $res->is_success;
+
+        my $json_res = getJSON($res);
+
+	#print Dumper($json_res);
+
+        return $json_res;
+};
+
+sub getVotersWithoutReward {
+	my ($txs, $utxs, $plvts) = @_;
+	
+	my @allvtrs = getAllVoters($plvts);
+	my @alltxsr = getAllTxsRecipient($txs, $utxs);
+
+	my %in_alltxsr = map {$_ => 1} @alltxsr;
+	my @vts  = grep {not $in_alltxsr{$_}} @allvtrs;	
+
+	return @vts;
+}
+
+sub getTransaction {
+	my ($id) = shift;
+        my $req = HTTP::Request->new(GET => 'http://localhost:'.$port.'/nxt?requestType=getTransaction&transaction='.$id);
+        my $res = $lwp->request($req);
+
+        my $json_res = getJSON($res);
+
+	return $json_res;
+}
+
+sub checkTransaction {
+	my ($id) = shift;
+	my $res = 0;
+
+	my $tx = getTransaction($id);
+	
+	#print Dumper($tx);
+
+	if($tx->{confirmations} >= 720)
+	{
+		$res = 1;
+	}
+
+	return $res;
+}
+
+sub checkVote {
+	my ($vt) = shift;
+	my $res = 0;
+	
+	if($vt->{weight} > 0)
+	{
+		$res = checkTransaction($vt->{transaction});
+	}
+
+	return $res;
+}
+
+sub getAllVoters {
+	my ($vtrs) = shift;
+	my $vtr;
+	my @res;
+
+	my $tmp = $vtrs->{votes};
+
+	foreach $vtr (@$tmp)
+	{
+		if(checkVote($vtr))
+		{
+			push(@res, $vtr->{voterRS});
+		}
+	}
+
+	return @res;
+}
+
+sub getAllRecipients {
+	my ($tmp, $res) = @_;
+	my $tx;
+
+	foreach $tx (@$tmp)
+	{
+		my $msg = $tx->{attachment}->{message};
+
+		if(defined $msg && $msg =~ /.*Poll:(.*); / && ($1 eq $poll))
+		{
+			push(@{$res}, $tx->{recipientRS});
+		}
+	}
+}
+
+sub getAllTxsRecipient {
+	my ($txsr, $utxsr) = @_;
+	my @res;
+
+	my $tmp = $txsr->{transactions};
+	getAllRecipients($tmp, \@res);
+	
+	$tmp = $utxsr->{unconfirmedTransactions};
+	getAllRecipients($tmp, \@res);
+
+	# do not reward the vote of poll creator and rewarding account...
+	push(@res, $account);
+	push(@res, $pollinfo->{accountRS});
+
+	return @res;
+}
+
