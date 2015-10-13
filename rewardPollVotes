@@ -200,11 +200,11 @@ sub sendReward {
 
 	if($asset eq 'NXT')
 	{
-        	$req->content("requestType=sendMoney&recipient=".$rec."&message=".$msg."&messageIsPrunable=false&amountNQT=".$men."&secretPhrase=".$secret."&feeNQT=100000000&deadline=1440");
+        	$req->content("requestType=sendMoney&recipient=".$rec."&message=".$msg."&messageIsPrunable=true&amountNQT=".$men."&secretPhrase=".$secret."&feeNQT=100000000&deadline=1440");
 	}
 	else
 	{
-        	$req->content("requestType=transferAsset&recipient=".$rec."&asset=".$asset."&message=".$msg."&messageIsPrunable=false&quantityQNT=".$men."&secretPhrase=".$secret."&feeNQT=100000000&deadline=1440");
+        	$req->content("requestType=transferAsset&recipient=".$rec."&asset=".$asset."&message=".$msg."&messageIsPrunable=true&quantityQNT=".$men."&secretPhrase=".$secret."&feeNQT=100000000&deadline=1440");
 	}
 
         my $res = $lwp->request($req);
@@ -243,12 +243,8 @@ sub getTransaction {
 }
 
 sub checkTransaction {
-	my ($id) = shift;
+	my ($tx) = shift;
 	my $res = 1;
-
-	my $tx = getTransaction($id);
-	
-	#print Dumper($tx);
 
 	if(looks_like_number($confirmations) && $tx->{confirmations} < $confirmations)
 	{
@@ -264,19 +260,32 @@ sub checkVote {
 
 	#print Dumper($vt);
 
-	my $wg = $vt->{weight};	
-
-	if(defined $wg)
+	if($pollinfo->{finished})
 	{
-		if($wg > 0)
-		{
-			$res = checkTransaction($vt->{transaction});
-		}
+		$res = 1;
 	}
 	else
 	{
-		# the poll has been finished...
-		$res = 1;
+		my $wg = $vt->{weight};	
+		my $tx = getTransaction($vt->{transaction});
+	
+		#print Dumper($tx);
+
+		if(defined $wg)
+		{
+			if($wg > 0)
+			{
+				$res = checkTransaction($tx);
+			}
+		}
+
+		# "old" transactionen filtern (I hope - it was rewarded soon)
+		my $con = looks_like_number($confirmations) ? $confirmations : 0;
+		my $txcon = $tx->{confirmations};
+		if((!defined $txcon) || $txcon > $con + 720)
+		{
+			$res = 0;
+		}		
 	}
 
 	return $res;
