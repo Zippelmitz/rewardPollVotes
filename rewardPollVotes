@@ -12,7 +12,7 @@ use Scalar::Util qw(looks_like_number);
 
 $| = 1;
 
-my $port = '7876';
+my $port = '6876';
 
 my $lwp = LWP::UserAgent->new;
 $lwp->agent("perl $]");
@@ -89,20 +89,30 @@ chomp($feedback);
 
 die 'Aborted...' unless $feedback eq '' || $feedback eq 'Y' || $feedback eq 'y' || $feedback eq 'yes';
 
-while (1) {
-  doit();
-  if($pollinfo->{finished})
-  {
-	print "The poll has been finished...\n";
-	exit(0);
-  }
-  sleep(30);
-  $pollinfo = getPoll($poll);
-}
+main();
+
+sub main
+{
+	while (1) {
+		eval{
+  			doit();
+  			if($pollinfo->{finished})
+  			{
+				print "The poll has been finished...\n";
+				exit(0);
+ 			}
+  			sleep(30);
+  			$pollinfo = getPoll($poll);
+		};
+  		# catch crashes:
+  		if($@){
+    			print " ERR $@\n";
+  		}
+	}
+};
 
 sub doit
 {
-  eval{
 	my $pollvotes = getPollVotes($poll);
 
 	#print Dumper($pollvotes);
@@ -127,11 +137,6 @@ sub doit
 		print $voter." - reward sent...\n";
 		#print Dumper($sendresp);
 	}
-  };
-  # catch crashes:
-  if($@){
-    print " ERR $@\n";
-  }
 }
 
 sub getJSON {
