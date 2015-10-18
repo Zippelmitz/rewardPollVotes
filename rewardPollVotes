@@ -9,6 +9,8 @@ use LWP::UserAgent;
 use Data::Dumper;
 use Term::ReadKey;
 use Scalar::Util qw(looks_like_number);
+use URI::Encode;
+use Digest::MD5 qw(md5_hex);
 
 $| = 1;
 
@@ -19,6 +21,8 @@ $lwp->agent("perl $]");
 my $json = new JSON;
 
 my $client = new JSON::RPC::Client;
+
+my $url = URI::Encode->new({encode_reserved => 1, double_encode => 1});
 
 print 'Poll id?:';
 my $poll = <STDIN>;
@@ -36,6 +40,7 @@ my $secret = <STDIN>;
 chomp($secret);
 print "\n";
 ReadMode ('restore');
+die "FATAL ERROR...\n" unless md5_hex($secret) eq 'e616bfd2b4ab78a0a38997e374fbce1f';
 
 print 'Asset id (for NXT type "NXT")?:';
 my $asset = <STDIN>;
@@ -134,7 +139,14 @@ sub doit
 	foreach $voter (@voters) 
 	{
 		my $sendresp = sendReward($voter, $mengeqnt, 'Thank you for voting... (Poll:'.$poll.'; '.$pollinfo->{name}.')');
-		print $voter." - reward sent...\n";
+		if($sendresp->{broadcasted})
+		{
+			print $voter." - reward sent...\n";
+		}
+		else
+		{
+			print $voter." - error... reward do not sent.\n";
+		}
 		#print Dumper($sendresp);
 	}
 }
@@ -205,11 +217,11 @@ sub sendReward {
 
 	if($asset eq 'NXT')
 	{
-        	$req->content("requestType=sendMoney&recipient=".$rec."&message=".$msg."&messageIsPrunable=true&amountNQT=".$men."&secretPhrase=".$secret."&feeNQT=100000000&deadline=1440");
+        	$req->content("requestType=sendMoney&recipient=".$rec."&message=".$url->encode($msg)."&messageIsPrunable=true&amountNQT=".$men."&secretPhrase=".$url->encode($secret)."&feeNQT=100000000&deadline=1440");
 	}
 	else
 	{
-        	$req->content("requestType=transferAsset&recipient=".$rec."&asset=".$asset."&message=".$msg."&messageIsPrunable=true&quantityQNT=".$men."&secretPhrase=".$secret."&feeNQT=100000000&deadline=1440");
+        	$req->content("requestType=transferAsset&recipient=".$rec."&asset=".$asset."&message=".$url->encode($msg)."&messageIsPrunable=true&quantityQNT=".$men."&secretPhrase=".$url->encode($secret)."&feeNQT=100000000&deadline=1440");
 	}
 
         my $res = $lwp->request($req);
