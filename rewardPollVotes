@@ -10,8 +10,8 @@ use NXT::Api;
 
 $| = 1;
 
-$Api::port = '6876';
-$Api::host = 'localhost';
+$NXT::Api::port = '7876';
+$NXT::Api::host = 'localhost';
 
 print 'Poll id?:';
 my $poll = <STDIN>;
@@ -29,7 +29,7 @@ my $secret = <STDIN>;
 chomp($secret);
 print "\n";
 ReadMode ('restore');
-die "FATAL ERROR...\n" unless md5_hex($secret) eq 'md5 digest of your secret phrase';
+die "FATAL ERROR...\n" unless md5_hex($secret) eq '28f04c606a1cc2298e647f1ad487e6c7';
 
 print 'Asset id (for NXT type "NXT")?:';
 my $asset = <STDIN>;
@@ -140,7 +140,7 @@ sub doit
 							'amountNQT' => $mengeqnt, 
 							'secretPhrase' => $secret, 
 							'feeNQT' => '100000000', 
-							'deadLine' => '1440' })					
+							'deadline' => '1440' })					
 		}
 		else
 		{
@@ -152,7 +152,7 @@ sub doit
 							'quantityQNT' => $mengeqnt, 
 							'secretPhrase' => $secret, 
 							'feeNQT' => '100000000', 
-							'deadLine' => '1440' })
+							'deadline' => '1440' })
 		}
 
 		if($sendresp->{broadcasted})
@@ -163,7 +163,7 @@ sub doit
 		{
 			print $voter." - error... reward do not sent.\n";
 		}
-		#print Dumper($sendresp);
+		print Dumper($sendresp);
 	}
 }
 
