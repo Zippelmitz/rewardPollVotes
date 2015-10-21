@@ -1,34 +1,23 @@
 #!/usr/bin/perl -w
 
 use strict;
-use JSON -support_by_pp;
-use JSON::RPC::Client;
 use warnings;
-use LWP::Simple;
-use LWP::UserAgent;
 use Data::Dumper;
 use Term::ReadKey;
 use Scalar::Util qw(looks_like_number);
-use URI::Encode;
 use Digest::MD5 qw(md5_hex);
+use NXT::Api;
 
 $| = 1;
 
-my $port = '7876';
-
-my $lwp = LWP::UserAgent->new;
-$lwp->agent("perl $]");
-my $json = new JSON;
-
-my $client = new JSON::RPC::Client;
-
-my $url = URI::Encode->new({encode_reserved => 1, double_encode => 1});
+$NXT::Api:port = '6876';
+$NXT::Api:host = 'localhost';
 
 print 'Poll id?:';
 my $poll = <STDIN>;
 chomp($poll);
 
-my $pollinfo = getPoll($poll);
+my $pollinfo = NXT::Api::GET({ 'requestType' => 'getPoll', 'poll' => $poll });
 
 print 'Account RS?:';
 my $account = <STDIN>;
@@ -40,13 +29,13 @@ my $secret = <STDIN>;
 chomp($secret);
 print "\n";
 ReadMode ('restore');
-die "FATAL ERROR...\n" unless md5_hex($secret) eq 'e616bfd2b4ab78a0a38997e374fbce1f';
+die "FATAL ERROR...\n" unless md5_hex($secret) eq 'md5 digest of your secret phrase';
 
 print 'Asset id (for NXT type "NXT")?:';
 my $asset = <STDIN>;
 chomp($asset);
 
-my $assetinfo = getAsset($asset);
+my $assetinfo = NXT::Api::GET({ 'requestType' => 'getAsset', 'asset' => $asset });
 
 print 'Amount?:';
 my $menge = <STDIN>;
@@ -107,7 +96,7 @@ sub main
 				exit(0);
  			}
   			sleep(30);
-  			$pollinfo = getPoll($poll);
+			$pollinfo = NXT::Api::GET({ 'requestType' => 'getPoll', 'poll' => $poll });
 		};
   		# catch crashes:
   		if($@){
@@ -118,18 +107,18 @@ sub main
 
 sub doit
 {
-	my $pollvotes = getPollVotes($poll);
+	my $pollvotes = NXT::Api::GET({ 'requestType' => 'getPollVotes', 'includeWeights' => 'true', 'poll' => $poll });
 
 	#print Dumper($pollvotes);
 
 	# first: get unconfirmed txs. 
 	# second: get confirmed txs.
 	# so there is no lost transactions, perhaps doubling...
-	my $unconftxs = getAllUnconfTx($account);
+	my $unconftxs = NXT::Api::GET({ 'requestType' => 'getUnconfirmedTransactions', 'account' => $account });
 
 	#print Dumper($unconftxs);
 
-	my $transactions = getAllTxWithMessage($account);
+	my $transactions = NXT::Api::GET({ 'requestType' => 'getBlockchainTransactions', 'withMessage' => 'true', 'account' => $account });
 
 	#print Dumper($transactions);
 
@@ -139,6 +128,32 @@ sub doit
 	foreach $voter (@voters) 
 	{
 		my $sendresp = sendReward($voter, $mengeqnt, 'Thank you for voting... (Poll:'.$poll.'; '.$pollinfo->{name}.')');
+		my $sendresp;
+		#send reward...
+		if($asset eq 'NXT')
+		{
+			NXT::Api::POST({'requestType' => 'sendMoney', 
+					'recipient' => $voter, 
+					'message' => $msg, 
+					'messageIsPrunable' => 'true', 
+					'amountNQT' => $mengeqnt, 
+					'secretPhrase' => $secret, 
+					'feeNQT' => '100000000', 
+					'deadLine' => '1440' })					
+		}
+		else
+		{
+			NXT::Api::POST({'requestType' => 'transferAsset', 
+					'recipient' => $voter, 
+					'message' => $msg, 
+					'asset' => $asset, 
+					'messageIsPrunable' => 'true', 
+					'quantityQNT' => $mengeqnt, 
+					'secretPhrase' => $secret, 
+					'feeNQT' => '100000000', 
+					'deadLine' => '1440' })
+		}
+
 		if($sendresp->{broadcasted})
 		{
 			print $voter." - reward sent...\n";
@@ -151,92 +166,6 @@ sub doit
 	}
 }
 
-sub getJSON {
-        my ($raw) = shift;
-
-        my $res = $json->allow_nonref->utf8->relaxed->escape_slash->loose->allow_singlequote->allow_barekey->decode($raw->content);
-
-        return $res;
-};
-
-sub getPollVotes {
-	my ($pl) = shift;
-        my $req = HTTP::Request->new(GET => 'http://localhost:'.$port.'/nxt?requestType=getPollVotes&includeWeights=true&poll='.$pl);
-        my $res = $lwp->request($req);
-
-        my $json_res = getJSON($res);
-
-	return $json_res;
-};
-
-sub getPoll {
-	my ($pl) = shift;
-        my $req = HTTP::Request->new(GET => 'http://localhost:'.$port.'/nxt?requestType=getPoll&poll='.$pl);
-        my $res = $lwp->request($req);
-
-        my $json_res = getJSON($res);
-
-	return $json_res;
-};
-
-sub getAsset {
-	my ($ast) = shift;
-        my $req = HTTP::Request->new(GET => 'http://localhost:'.$port.'/nxt?requestType=getAsset&asset='.$ast);
-        my $res = $lwp->request($req);
-
-        my $json_res = getJSON($res);
-
-	return $json_res;
-};
-
-sub getAllTxWithMessage {
-	my ($acc) = shift;
-        my $req = HTTP::Request->new(GET => 'http://localhost:'.$port.'/nxt?requestType=getBlockchainTransactions&withMessage=true&account='.$acc);
-        my $res = $lwp->request($req);
-
-        my $json_res = getJSON($res);
-
-	return $json_res;
-};
-
-sub getAllUnconfTx {
-	my ($acc) = shift;
-        my $req = HTTP::Request->new(GET => 'http://localhost:'.$port.'/nxt?requestType=getUnconfirmedTransactions&account='.$acc);
-        my $res = $lwp->request($req);
-
-        my $json_res = getJSON($res);
-
-	return $json_res;
-};
-
-sub sendReward {
-        my ($rec, $men, $msg) = @_;
-
-        my $req = HTTP::Request->new(POST => 'http://localhost:'.$port.'/nxt');
-        $req->content_type('application/x-www-form-urlencoded');
-
-	if($asset eq 'NXT')
-	{
-        	$req->content("requestType=sendMoney&recipient=".$rec."&message=".$url->encode($msg)."&messageIsPrunable=true&amountNQT=".$men."&secretPhrase=".$url->encode($secret)."&feeNQT=100000000&deadline=1440");
-	}
-	else
-	{
-        	$req->content("requestType=transferAsset&recipient=".$rec."&asset=".$asset."&message=".$url->encode($msg)."&messageIsPrunable=true&quantityQNT=".$men."&secretPhrase=".$url->encode($secret)."&feeNQT=100000000&deadline=1440");
-	}
-
-        my $res = $lwp->request($req);
-
-	#print Dumper($res);
-
-        die "Request failed!" unless $res->is_success;
-
-        my $json_res = getJSON($res);
-
-	#print Dumper($json_res);
-
-        return $json_res;
-};
-
 sub getVotersWithoutReward {
 	my ($txs, $utxs, $plvts) = @_;
 	
@@ -247,16 +176,6 @@ sub getVotersWithoutReward {
 	my @vts  = grep {not $in_alltxsr{$_}} @allvtrs;	
 
 	return @vts;
-}
-
-sub getTransaction {
-	my ($id) = shift;
-        my $req = HTTP::Request->new(GET => 'http://localhost:'.$port.'/nxt?requestType=getTransaction&transaction='.$id);
-        my $res = $lwp->request($req);
-
-        my $json_res = getJSON($res);
-
-	return $json_res;
 }
 
 sub checkTransaction {
@@ -284,7 +203,7 @@ sub checkVote {
 	else
 	{
 		my $wg = $vt->{weight};	
-		my $tx = getTransaction($vt->{transaction});
+		my $tx = NXT::Api::GET({ 'requestType' => 'getTransaction', 'transaction' => $vt->{transaction} });
 	
 		#print Dumper($tx);
 
@@ -357,4 +276,3 @@ sub getAllTxsRecipient {
 
 	return @res;
 }
-
