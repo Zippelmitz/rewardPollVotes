@@ -10,8 +10,8 @@ use NXT::Api;
 
 $| = 1;
 
-$NXT::Api:port = '6876';
-$NXT::Api:host = 'localhost';
+$Api::port = '6876';
+$Api::host = 'localhost';
 
 print 'Poll id?:';
 my $poll = <STDIN>;
@@ -127,31 +127,32 @@ sub doit
 
 	foreach $voter (@voters) 
 	{
-		my $sendresp = sendReward($voter, $mengeqnt, 'Thank you for voting... (Poll:'.$poll.'; '.$pollinfo->{name}.')');
 		my $sendresp;
+		my $msg = 'Thank you for voting... (Poll:'.$poll.'; '.$pollinfo->{name}.')';
+
 		#send reward...
 		if($asset eq 'NXT')
 		{
-			NXT::Api::POST({'requestType' => 'sendMoney', 
-					'recipient' => $voter, 
-					'message' => $msg, 
-					'messageIsPrunable' => 'true', 
-					'amountNQT' => $mengeqnt, 
-					'secretPhrase' => $secret, 
-					'feeNQT' => '100000000', 
-					'deadLine' => '1440' })					
+			$sendresp = NXT::Api::POST({	'requestType' => 'sendMoney', 
+							'recipient' => $voter, 
+							'message' => $msg, 
+							'messageIsPrunable' => 'true', 
+							'amountNQT' => $mengeqnt, 
+							'secretPhrase' => $secret, 
+							'feeNQT' => '100000000', 
+							'deadLine' => '1440' })					
 		}
 		else
 		{
-			NXT::Api::POST({'requestType' => 'transferAsset', 
-					'recipient' => $voter, 
-					'message' => $msg, 
-					'asset' => $asset, 
-					'messageIsPrunable' => 'true', 
-					'quantityQNT' => $mengeqnt, 
-					'secretPhrase' => $secret, 
-					'feeNQT' => '100000000', 
-					'deadLine' => '1440' })
+			$sendresp = NXT::Api::POST({	'requestType' => 'transferAsset', 
+							'recipient' => $voter, 
+							'message' => $msg, 
+							'asset' => $asset, 
+							'messageIsPrunable' => 'true', 
+							'quantityQNT' => $mengeqnt, 
+							'secretPhrase' => $secret, 
+							'feeNQT' => '100000000', 
+							'deadLine' => '1440' })
 		}
 
 		if($sendresp->{broadcasted})
