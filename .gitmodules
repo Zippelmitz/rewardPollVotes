@@ -1,0 +1,3 @@
+[submodule "NXT"]
+	path = NXT
+	url = https://github.com/ifinta/NXT.git
